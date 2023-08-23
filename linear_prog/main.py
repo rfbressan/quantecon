@@ -2,6 +2,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.patches import Polygon
 from ortools.linear_solver import pywraplp
+from scipy.optimize import linprog
 
 # Production problem
 
@@ -16,9 +17,7 @@ from ortools.linear_solver import pywraplp
 # Draw the constraint lines
 x = np.linspace(-2.2, 17.5, 100)
 # Feasible region
-feasible_region = Polygon(
-    [[0, 0], [0, 6], [2.5, 5], [5, 0]], color="cyan", alpha=0.5
-)
+feasible_region = Polygon([[0, 0], [0, 6], [2.5, 5], [5, 0]], color="cyan", alpha=0.5)
 
 fig, ax = plt.subplots(figsize=(8, 6))
 ax.grid()
@@ -55,3 +54,50 @@ if status == pywraplp.Solver.OPTIMAL:
     print("x2 = ", x2.solution_value())
 else:
     print("The problem does not have an optimal solution.")
+
+# Useful transformations
+
+# The standard form LP problem can be expressed concisely as:
+# \begin{aligned}
+# \min_{x} \ & c'x \\
+# \mbox{subject to } \ & Ax = b\\
+#  & x \geq 0\\
+# \end{aligned}
+
+# A minimization problem subject to equality constraints and nonnegativity constraints
+
+# Original problem
+# \begin{aligned}
+# \max_{x_1,x_2} \ & 3 x_1 + 4 x_2 \\
+# \mbox{subject to } \ & 2 x_1 + 5 x_2 \le 30 \\
+# & 4 x_1 + 2 x_2 \le 20 \\
+# & x_1, x_2 \ge 0 \\
+# \end{aligned}
+
+# equivalent to the following problem with a standard form:
+# \begin{aligned}
+# \min_{x_1,x_2} \ & -(3 x_1 + 4 x_2) \\
+# \mbox{subject to } \ & 2 x_1 + 5 x_2 + s_1 = 30 \\
+# & 4 x_1 + 2 x_2 + s_2 = 20 \\
+# & x_1, x_2, s_1, s_2 \ge 0 \\
+# \end{aligned}
+
+# Inequality constraints: Given an inequality constraint $\sum_{j=1}^n a_{ij}x_j \le 0$, we can introduce a new variable $s_i\geq 0$, called a slack variable and replace the original constraint by
+# $\sum_{j=1}^n a_{ij}x_j + s_i = 0$.
+
+# Using Scipy
+# Construct parameters
+c_ex1 = np.array([3, 4])
+
+# Inequality constraints
+A_ex1 = np.array([[2, 5], [4, 2]])
+b_ex1 = np.array([30, 20])
+
+# Solve the maximization problem
+res = linprog(-c_ex1, A_ub=A_ex1, b_ub=b_ex1, bounds=(0, None))
+
+if res.success:
+    print(f"Max value: {-res.fun}")
+    print(f"Solutions: {res.x}")
+else:
+    print("No solution found.")
