@@ -44,10 +44,8 @@ class LakeModel:
                 [(1 - self.d) * self.λ, (1 - self.α) * (1 - self.d)],
             ]
         )
-        self.ū = (1 + self.g - (1 - self.d) * (1 - self.α)) / (
-            1 + self.g - (1 - self.d) * (1 - self.α) + (1 - self.d) * self.λ
-        )
-        self.ē = 1 - self.ū
+        self.ū = self.long_term_state()[0]
+        self.ē = self.long_term_state()[1]
 
     def simulate_path(self, x0, T=1000):
         """
@@ -72,6 +70,24 @@ class LakeModel:
         for t in range(1, T):
             x_ts[:, t] = self.A @ x_ts[:, t - 1]
         return x_ts
+
+    def long_term_state(self):
+        """
+        Computes the long term state of the system
+
+        Returns
+        ----------
+        x : array
+            Contains long term values (ū,ē)
+
+        """
+        # there is a unique positive eigenvector associated with the
+        # dominant eigenvalue.
+
+        # Find the index of dominant eigenvalue
+        eig_vals, eig_vecs = np.linalg.eig(self.A)
+        idx = np.argmax(eig_vals)
+        return eig_vecs[:, idx] / eig_vecs[:, idx].sum()
 
 
 # Plot Functions
@@ -129,8 +145,11 @@ def main():
     x_0 = np.array([u_0, e_0])
 
     lm = LakeModel()
+    # Check long term state
+    print(lm.ū, lm.ē)
+    # Simulate path
     x_path = lm.simulate_path(x_0, T)
-    # plot_dynamics(x_path)
+    plot_dynamics(x_path)
     plot_path(lm, x_path)
 
 
