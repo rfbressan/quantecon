@@ -104,7 +104,7 @@ class Utility(ABC):
     """Utility function abstract class."""
 
     @abstractmethod
-    def function(self):
+    def function(self, c: float) -> float:
         pass
 
 
@@ -135,6 +135,9 @@ class McCallModelSeparation:
     c: float = 6.0
     w: NDArray = np.arange(10, 60, 10)
     q: NDArray = np.ones(len(w)) / len(w)
+    value_function: NDArray = field(init=False, repr=False)
+    continuation_value: float = field(init=False, repr=False)
+    __solved: bool = field(init=False, repr=False, default=False)
 
     def __update(self, v: NDArray, d: float) -> tuple[NDArray, float]:
         """Update rule for value function and continuation value."""
@@ -150,7 +153,7 @@ class McCallModelSeparation:
 
     def solve_model(
         self, max_iter: int = 2000, tol: float = 1e-6, verbose: bool = False
-    ) -> tuple[NDArray, float]:
+    ):
         """Solves the iteration procedure. Returns the value function, v, and the continuation value, d."""
         # Initial guesses
         v = np.ones_like(self.w)
@@ -173,14 +176,98 @@ class McCallModelSeparation:
         else:
             raise ValueError(f"Convergence not reached in {max_iter} iterations.")
 
-        return v, d
+        self.value_function = v
+        self.continuation_value = d
+        self.__solved = True
 
-    def reservation_wage(self, v: NDArray, d: float) -> tuple[int, float]:
+    def reservation_wage(self) -> tuple[int, float]:
         """Compute the reservation wage."""
         α, β, c, w, q = self.α, self.β, self.c, self.w, self.q
-        h = self.utility.function(c) + β * d
-        idx = np.searchsorted(v, h, side="right")
+        # Check if model has been solved
+        if not self.__solved:
+            raise ValueError("Model has not been solved.")
+        else:
+            h = self.utility.function(c) + β * self.continuation_value
+            idx = np.searchsorted(self.value_function, h, side="right")
+
         return idx, float(w[idx])
+
+    def plot_reservation_wage_determination(self):
+        """Plot the intersection of the value function and the continuation value."""
+        # Check if model has been solved
+        if not self.__solved:
+            raise ValueError("Model has not been solved.")
+
+        idx, w_bar = self.reservation_wage()
+        h = self.utility.function(self.c) + self.β * self.continuation_value
+
+        i_end = len(self.w) - 1  # Index of last element
+        fig, ax = plt.subplots(figsize=(10, 6))
+        ax.plot(self.w, self.value_function, "b-", lw=2, alpha=0.7, label="$v$")
+        ax.hlines(
+            h, self.w[0], self.w[i_end], colors="green", lw=2, alpha=0.7, label="$h$"
+        )
+        ax.plot(w_bar, self.value_function[idx], "r*", markersize=15)
+        ax.set_xlim(min(self.w), max(self.w))
+        ax.legend()
+        plt.show()
+
+    def plot_reservation_wage_compensation(self, c_vals: NDArray):
+        """Plot the reservation wage as a function of the unemployment compensation."""
+        # Reservation wage array
+        R = np.empty_like(c_vals)
+        utility = CRRAUtility()
+        # Iterate over c values
+        for i, c in enumerate(c_vals):
+            mcm = McCallModelSeparation(utility, c=c, w=self.w, q=self.q)
+            mcm.solve_model()
+            _, R[i] = mcm.reservation_wage()
+
+        # Plot the reservation wage
+        fig, ax = plt.subplots(figsize=(10, 6))
+        ax.plot(c_vals, R, lw=2, alpha=0.6, label="reservation wage")
+        ax.set_xlabel("Unemployment compensation")
+        ax.set_ylabel("Reservation wage")
+        ax.legend(loc="upper left")
+        plt.show()
+
+    def plot_reservation_wage_beta(self, β_vals: NDArray):
+        """Plot the reservation wage as a function of the unemployment compensation."""
+        # Reservation wage array
+        R = np.empty_like(β_vals)
+        utility = CRRAUtility()
+        # Iterate over c values
+        for i, β in enumerate(β_vals):
+            mcm = McCallModelSeparation(utility, β=β, w=self.w, q=self.q)
+            mcm.solve_model()
+            _, R[i] = mcm.reservation_wage()
+
+        # Plot the reservation wage
+        fig, ax = plt.subplots(figsize=(10, 6))
+        ax.plot(β_vals, R, lw=2, alpha=0.6, label="reservation wage")
+        ax.set_xlabel("Discounting factor")
+        ax.set_ylabel("Reservation wage")
+        ax.legend(loc="upper left")
+        plt.show()
+
+    def plot_reservation_wage_alpha(self, α_vals: NDArray):
+        """Plot the reservation wage as a function of the unemployment compensation."""
+        # Reservation wage array
+        R = np.empty_like(α_vals)
+        utility = CRRAUtility()
+        # Iterate over c values
+        for i, α in enumerate(α_vals):
+            mcm = McCallModelSeparation(utility, α=α, w=self.w, q=self.q)
+            mcm.solve_model()
+            _, R[i] = mcm.reservation_wage()
+
+        # Plot the reservation wage
+        fig, ax = plt.subplots(figsize=(10, 6))
+        ax.plot(α_vals, R, lw=2, alpha=0.6, label="reservation wage")
+        ax.set_xlabel("Separation rate")
+        ax.set_ylabel("Reservation wage")
+        ax.legend(loc="upper left")
+        plt.show()
 
 
 # Auxiliary functions
@@ -272,21 +359,16 @@ def main():
     mcm_sep = McCallModelSeparation(
         crra_utility, α=0.2, β=0.98, c=6.0, w=w_default, q=q_default
     )
-    v, d = mcm_sep.solve_model(verbose=False)
+    mcm_sep.solve_model(verbose=False)
     # Reservation wage
-    idx, w_bar = mcm_sep.reservation_wage(v, d)
-    h = mcm_sep.utility.function(mcm_sep.c) + mcm_sep.β * d
-
-    fig, ax = plt.subplots(figsize=(10, 6))
-
-    ax.plot(mcm_sep.w, v, "b-", lw=2, alpha=0.7, label="$v$")
-    ax.hlines(
-        h, w_default[0], w_default[n], colors="green", lw=2, alpha=0.7, label="$h$"
-    )
-    ax.plot(w_bar, v[idx], "r*", markersize=15)
-    ax.set_xlim(min(mcm_sep.w), max(mcm_sep.w))
-    ax.legend()
-    plt.show()
+    mcm_sep.plot_reservation_wage_determination()
+    # Plot resevation wage by unemployment compensation
+    c_vals = np.linspace(2, 12, 40)
+    mcm_sep.plot_reservation_wage_compensation(c_vals)
+    β_vals = np.linspace(0.8, 0.99, 40)
+    mcm_sep.plot_reservation_wage_beta(β_vals)
+    α_vals = np.linspace(0.05, 0.5, 40)
+    mcm_sep.plot_reservation_wage_alpha(α_vals)
 
 
 if __name__ == "__main__":
