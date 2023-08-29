@@ -1,6 +1,7 @@
 """McCall job search model
 """
 
+from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 
 import matplotlib.pyplot as plt
@@ -61,6 +62,126 @@ class McCallModel:
         σ = self.w >= self.reservation_wage()
         return σ
 
+    def __compute_stopping_time(self, seed: int = 1234) -> int:
+        """One time simulation of how many offers until the worker accepts."""
+        np.random.seed(seed)
+        cdf = np.cumsum(self.q)
+        w_bar = self.reservation_wage()
+        t = 0
+        while True:
+            # Draw a wage offer
+            w = self.w[qe.random.draw(cdf)]
+            if w >= w_bar:
+                break
+            else:
+                t += 1
+
+        return t
+
+    def simulate_mean_stopping_time(self, num_reps: int = 1_000) -> float:
+        """Mean stopping time of the worker.
+
+        Parameters
+        ----------
+        num_reps : int, optional
+            Number of simulations to take the average time, by default 1_000
+
+        Returns
+        -------
+        float
+            The average stopping time.
+        """
+        stopping_times = np.empty(num_reps)
+        for i in range(num_reps):
+            stopping_times[i] = self.__compute_stopping_time(seed=i)
+
+        return stopping_times.mean()
+
+
+# Class to hold utility functions
+@dataclass
+class Utility(ABC):
+    """Utility function abstract class."""
+
+    @abstractmethod
+    def function(self):
+        pass
+
+
+# CRRA utility class
+@dataclass
+class CRRAUtility(Utility):
+    """CRRA utility function."""
+
+    σ: float = 2.0
+
+    def function(self, c: float) -> float:
+        """CRRA utility function."""
+        σ = self.σ
+        if σ == 1:
+            return np.log(c)
+        else:
+            return (c ** (1 - σ) - 1) / (1 - σ)
+
+
+# McCall Model with separation class
+@dataclass
+class McCallModelSeparation:
+    """McCall model with separation."""
+
+    utility: Utility
+    α: float = 0.2
+    β: float = 0.98
+    c: float = 6.0
+    w: NDArray = np.arange(10, 60, 10)
+    q: NDArray = np.ones(len(w)) / len(w)
+
+    def __update(self, v: NDArray, d: float) -> tuple[NDArray, float]:
+        """Update rule for value function and continuation value."""
+        α, β, c, w, q = self.α, self.β, self.c, self.w, self.q
+        v_new = np.empty_like(v)  # Same shape and type as v
+
+        for i in range(len(w)):
+            v_new[i] = self.utility.function(w[i]) + β * ((1 - α) * v[i] + α * d)
+
+        d_new = np.sum(np.maximum(v, self.utility.function(c) + β * d) * q)
+
+        return v_new, d_new
+
+    def solve_model(
+        self, max_iter: int = 2000, tol: float = 1e-6, verbose: bool = False
+    ) -> tuple[NDArray, float]:
+        """Solves the iteration procedure. Returns the value function, v, and the continuation value, d."""
+        # Initial guesses
+        v = np.ones_like(self.w)
+        d = 1.0
+
+        for i in range(max_iter):
+            v_new, d_new = self.__update(v, d)
+            error1 = np.max(np.abs(v - v_new))
+            error2 = np.abs(d - d_new)
+            error = max(error1, error2)
+            if verbose:
+                print(f"Error at iteration {i} is {error:.4f}.")
+            if error < tol:
+                v = v_new
+                d = d_new
+                break
+
+            v = v_new
+            d = d_new
+        else:
+            raise ValueError(f"Convergence not reached in {max_iter} iterations.")
+
+        return v, d
+
+    def reservation_wage(self, v: NDArray, d: float) -> tuple[int, float]:
+        """Compute the reservation wage."""
+        α, β, c, w, q = self.α, self.β, self.c, self.w, self.q
+        h = self.utility.function(c) + β * d
+        idx = np.searchsorted(v, h, side="right")
+        return idx, float(w[idx])
+
 
 # Auxiliary functions
 
@@ -115,50 +236,57 @@ def plot_reservation_wage_contour(
     plt.show()
 
 
-def compute_stopping_time(mcm: McCallModel, seed: int = 1234) -> int:
-    """Compute how many offers until the worker accepts."""
-    np.random.seed(seed)
-    cdf = np.cumsum(mcm.q)
-    w_bar = mcm.reservation_wage()
-    t = 0
-    while True:
-        # Draw a wage offer
-        w = mcm.w[qe.random.draw(cdf)]
-        if w >= w_bar:
-            break
-        else:
-            t += 1
-
-    return t
-
-
-def simulate_mean_stopping_time(mcm: McCallModel, num_reps: int = 1_000) -> float:
-    """Simulate mean stopping time."""
-    stopping_times = np.empty(num_reps)
-    for i in range(num_reps):
-        stopping_times[i] = compute_stopping_time(mcm, seed=i)
-
-    return stopping_times.mean()
-
-
 def main():
     """Program to test the McCallModel class."""
-    n, a, b = 50, 200, 100  # default parameters
+    n, a, b = 60, 600, 400  # default parameters
     q_default = BetaBinomial(n, a, b).pdf()  # default choice of q
-    w_min, w_max = 10, 60
+    w_min, w_max = 10, 20
     w_default = np.linspace(w_min, w_max, n + 1)
 
     # Instantiate an instance of McCallModel with default parameters
-    mcm = McCallModel(c=25, β=0.99, w=w_default, q=q_default)
-    w_bar = mcm.reservation_wage()
-    print(f"Reservation wage = {w_bar:.5f}")
+    # mcm = McCallModel(c=25, β=0.99, w=w_default, q=q_default)
+    # w_bar = mcm.reservation_wage()
+    # print(f"Reservation wage = {w_bar:.5f}")
 
     # plot_optimal_policy(mcm)
     # c_vals = np.linspace(10, 30, 25)
     # β_vals = np.linspace(0.9, 0.99, 25)
     # plot_reservation_wage_contour(c_vals, β_vals, w_default, q_default)
-    avg_stop_time = simulate_mean_stopping_time(mcm)
-    print(f"Average stopping time = {avg_stop_time:.3f}")
+    # Simulate average stopping time for different values of c
+    # c_vals = np.linspace(10, 40, 25)
+    # avg_stop_times = np.empty(len(c_vals))
+    # for i, c in enumerate(c_vals):
+    #     mcm = McCallModel(c=c, β=0.99, w=w_default, q=q_default)
+    #     avg_stop_times[i] = mcm.simulate_mean_stopping_time()
+
+    # fig, ax = plt.subplots(figsize=(10, 6))
+    # ax.plot(c_vals, avg_stop_times)
+    # ax.set_xlabel("c")
+    # ax.set_ylabel("Mean Stopping Time")
+    # plt.show()
+
+    # Testing the McCallModelSeparation class
+    crra_utility = CRRAUtility(σ=2.0)
+    # utility = crra_utility.function(w_default)
+    # print(f"Utility = {utility}")
+    mcm_sep = McCallModelSeparation(
+        crra_utility, α=0.2, β=0.98, c=6.0, w=w_default, q=q_default
+    )
+    v, d = mcm_sep.solve_model(verbose=False)
+    # Reservation wage
+    idx, w_bar = mcm_sep.reservation_wage(v, d)
+    h = mcm_sep.utility.function(mcm_sep.c) + mcm_sep.β * d
+
+    fig, ax = plt.subplots(figsize=(10, 6))
+
+    ax.plot(mcm_sep.w, v, "b-", lw=2, alpha=0.7, label="$v$")
+    ax.hlines(
+        h, w_default[0], w_default[n], colors="green", lw=2, alpha=0.7, label="$h$"
+    )
+    ax.plot(w_bar, v[idx], "r*", markersize=15)
+    ax.set_xlim(min(mcm_sep.w), max(mcm_sep.w))
+    ax.legend()
+    plt.show()
 
 
 if __name__ == "__main__":
